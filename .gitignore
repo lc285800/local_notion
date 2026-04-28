@@ -1,0 +1,10 @@
+node_modules/
+dist/
+
+# Local notebook data
+docs/
+config.json
+
+# OS/editor noise
+.DS_Store
+.vscode/
