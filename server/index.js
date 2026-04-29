@@ -61,12 +61,12 @@ app.post("/api/notes", async (request, response) => {
 
 app.put("/api/note", async (request, response) => {
   try {
-    await saveNote(
+    const note = await saveNote(
       request.query.path,
       request.body.content || "",
       request.query.scope || "notes"
     );
-    response.json({ message: "Note saved locally." });
+    response.json({ note, message: "Note saved locally." });
   } catch (error) {
     response.status(400).json({ error: error.message });
   }

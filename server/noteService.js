@@ -11,8 +11,9 @@ const scopeRoots = {
 
 function sanitizeSegment(segment) {
   return segment
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]/g, "-")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^\p{L}\p{N}_-]/gu, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "") || "untitled";
 }
@@ -132,6 +133,23 @@ async function resolveUniqueNotePath(scope, requestedPath, label = "copy") {
   return candidate.replaceAll(path.sep, "/");
 }
 
+async function resolveIncrementalNotePath(scope, requestedPath) {
+  const root = getScopeRoot(scope);
+  const normalized = normalizeNotePathForScope(requestedPath);
+  const directory = path.dirname(normalized);
+  const stem = path.basename(normalized, ".md");
+  let counter = 0;
+  let candidate = normalized;
+
+  while (await pathExists(path.join(root, candidate))) {
+    counter += 1;
+    const fileName = `${stem}-${counter}.md`;
+    candidate = directory === "." ? fileName : path.join(directory, fileName);
+  }
+
+  return candidate.replaceAll(path.sep, "/");
+}
+
 async function readTrashMeta(notePath) {
   const metaPath = getTrashMetaPath(notePath);
   if (!(await pathExists(metaPath))) {
@@ -198,6 +216,7 @@ async function walkNotes(currentDir, scope, notes, query) {
 
     const relativePath = relativePathFromScope(scope, fullPath);
     const content = await fs.readFile(fullPath, "utf8");
+    const stat = await fs.stat(fullPath);
     const title = getTitleFromContent(relativePath, content);
 
     if (!notePathMatchesQuery(title, content, query)) {
@@ -206,7 +225,9 @@ async function walkNotes(currentDir, scope, notes, query) {
 
     const note = {
       path: relativePath,
-      title
+      title,
+      createdAt: stat.birthtime.toISOString(),
+      updatedAt: stat.mtime.toISOString()
     };
 
     if (scope === "trash") {
@@ -222,25 +243,28 @@ export async function listNotes(query = "") {
   await ensureScope("notes");
   const notes = [];
   await walkNotes(docsDir, "notes", notes, query);
-  return notes.sort((a, b) => a.path.localeCompare(b.path));
+  return notes.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 }
 
 export async function listTrashNotes(query = "") {
   await ensureScope("trash");
   const notes = [];
   await walkNotes(trashDir, "trash", notes, query);
-  return notes.sort((a, b) => a.path.localeCompare(b.path));
+  return notes.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 }
 
 export async function readNote(notePath, scope = "notes") {
   const normalizedPath = normalizeNotePathForScope(notePath);
   const fullPath = toAbsoluteNotePath(normalizedPath, scope);
   const content = await fs.readFile(fullPath, "utf8");
+  const stat = await fs.stat(fullPath);
   const note = {
     path: normalizedPath,
     title: getTitleFromContent(normalizedPath, content),
     content,
-    scope
+    scope,
+    createdAt: stat.birthtime.toISOString(),
+    updatedAt: stat.mtime.toISOString()
   };
 
   if (scope === "trash") {
@@ -252,30 +276,24 @@ export async function readNote(notePath, scope = "notes") {
 }
 
 export async function createNote(name) {
-  const normalized = sanitizeNotePath(name);
+  const requestedName = String(name || "").trim() || "未命名.md";
+  const sanitizedPath = sanitizeNotePath(requestedName);
+  const normalized = await resolveIncrementalNotePath("notes", sanitizedPath);
   const fullPath = toAbsoluteNotePath(normalized, "notes");
   await fs.mkdir(path.dirname(fullPath), { recursive: true });
 
-  if (await pathExists(fullPath)) {
-    throw new Error("Note already exists");
-  }
-
   const title = path.basename(normalized, ".md");
-  const initialContent = `# ${title}\n\n`;
+  const initialContent = `# ${title.replace(/-\d+$/, "") || "未命名"}\n\n`;
   await fs.writeFile(fullPath, initialContent, "utf8");
 
-  return {
-    path: normalized,
-    title,
-    content: initialContent,
-    scope: "notes"
-  };
+  return readNote(normalized, "notes");
 }
 
 export async function saveNote(notePath, content, scope = "notes") {
   const fullPath = toAbsoluteNotePath(notePath, scope);
   await fs.mkdir(path.dirname(fullPath), { recursive: true });
   await fs.writeFile(fullPath, content, "utf8");
+  return readNote(notePath, scope);
 }
 
 export async function renameNote(notePath, nextFileName) {

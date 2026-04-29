@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
+  codeBlockPlugin,
   CreateLink,
   headingsPlugin,
   imagePlugin,
+  InsertCodeBlock,
   InsertImage,
   InsertTable,
   InsertThematicBreak,
@@ -26,7 +28,9 @@ const emptyNote = {
   title: "",
   content: "",
   scope: "notes",
-  originalPath: ""
+  originalPath: "",
+  createdAt: "",
+  updatedAt: ""
 };
 
 function App() {
@@ -36,13 +40,41 @@ function App() {
   const [activePath, setActivePath] = useState("");
   const [draft, setDraft] = useState(emptyNote);
   const [savedContent, setSavedContent] = useState("");
-  const [status, setStatus] = useState("Loading notes...");
+  const [status, setStatus] = useState("正在加载笔记...");
   const [isSaving, setIsSaving] = useState(false);
-  const [newNoteName, setNewNoteName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [exportedMarkdown, setExportedMarkdown] = useState("");
   const [contextMenu, setContextMenu] = useState(null);
   const [renameState, setRenameState] = useState(null);
+  const [activeMenu, setActiveMenu] = useState(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  const assetBasePath = useMemo(() => {
+    if (!draft.path) {
+      return "/files/";
+    }
+
+    const segments = draft.path.split("/");
+    segments.pop();
+    const noteDir = segments.length ? `${segments.join("/")}/` : "";
+    return `/files/${noteDir}`;
+  }, [draft.path]);
+
+  const editorMarkdown = useMemo(() => {
+    if (!draft.path) {
+      return draft.content;
+    }
+
+    return transformMarkdownForEditor(draft.content, assetBasePath);
+  }, [assetBasePath, draft.content, draft.path]);
+
+  const derivedTitle = useMemo(() => {
+    return extractTitleFromContent(draft.path, draft.content) || "未命名";
+  }, [draft.content, draft.path]);
+
+  const isDirty = !!draft.path && draft.content !== savedContent;
+  const wordCount = useMemo(() => countWords(draft.content), [draft.content]);
+  const saveLabel = isSaving ? "保存中" : isDirty ? "未保存" : "✓ 已保存";
 
   useEffect(() => {
     initializeApp();
@@ -74,6 +106,29 @@ function App() {
   }, [contextMenu]);
 
   useEffect(() => {
+    if (!activeMenu) {
+      return;
+    }
+
+    function handlePointerDown() {
+      setActiveMenu(null);
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setActiveMenu(null);
+      }
+    }
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeMenu]);
+
+  useEffect(() => {
     function handleKeyDown(event) {
       if ((!event.metaKey && !event.ctrlKey) || event.key.toLowerCase() !== "s") {
         return;
@@ -91,32 +146,19 @@ function App() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [draft.path, draft.content]);
+  }, [draft.path, draft.content, assetBasePath]);
 
-  const assetBasePath = useMemo(() => {
-    if (!draft.path) {
-      return "/files/";
+  useEffect(() => {
+    if (!draft.path || !isDirty || isSaving) {
+      return;
     }
 
-    const segments = draft.path.split("/");
-    segments.pop();
-    const noteDir = segments.length ? `${segments.join("/")}/` : "";
-    return `/files/${noteDir}`;
-  }, [draft.path]);
+    const saveTimer = window.setTimeout(() => {
+      saveNote();
+    }, 1200);
 
-  const editorMarkdown = useMemo(() => {
-    if (!draft.path) {
-      return draft.content;
-    }
-
-    return transformMarkdownForEditor(draft.content, assetBasePath);
-  }, [assetBasePath, draft.content, draft.path]);
-
-  const derivedTitle = useMemo(() => {
-    return extractTitleFromContent(draft.path, draft.content);
-  }, [draft.content, draft.path]);
-
-  const isDirty = !!draft.path && draft.content !== savedContent;
+    return () => window.clearTimeout(saveTimer);
+  }, [draft.path, draft.content, savedContent, isSaving]);
 
   useEffect(() => {
     if (!editorRef.current || !draft.path) {
@@ -138,7 +180,7 @@ function App() {
       return;
     }
 
-    setEmptyState("Create your first note to get started.");
+    setEmptyState("点击 + 创建第一篇笔记");
   }
 
   async function fetchJson(url, options) {
@@ -164,9 +206,10 @@ function App() {
     setActivePath(data.path);
     setDraft(data);
     setSavedContent(data.content);
-    setStatus(`Opened ${data.path}`);
+    setStatus(`已打开 ${data.path}`);
     setExportedMarkdown("");
     setContextMenu(null);
+    setActiveMenu(null);
   }
 
   function setEmptyState(message) {
@@ -179,41 +222,22 @@ function App() {
 
   async function createNote() {
     try {
-      const requestedName = newNoteName.trim() || createTimestampNoteName();
       const data = await fetchJson("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: requestedName })
+        body: JSON.stringify({ name: "未命名.md" })
       });
 
-      setNewNoteName("");
-      await loadNotes();
+      setNotes((current) => [toNoteListItem(data), ...current.filter((note) => note.path !== data.path)]);
       await openNote(data.path);
-      setStatus(`Created ${data.path}`);
+      setStatus(`已创建 ${data.path}`);
 
       requestAnimationFrame(() => {
-        editorRef.current?.focus();
+        document.querySelector(".title-input")?.focus();
       });
     } catch (error) {
       setStatus(error.message);
     }
-  }
-
-  function createTimestampNoteName() {
-    const now = new Date();
-    const stamp = [
-      now.getFullYear(),
-      String(now.getMonth() + 1).padStart(2, "0"),
-      String(now.getDate()).padStart(2, "0"),
-      "-",
-      String(now.getHours()).padStart(2, "0"),
-      String(now.getMinutes()).padStart(2, "0"),
-      String(now.getSeconds()).padStart(2, "0"),
-      "-",
-      String(now.getMilliseconds()).padStart(3, "0")
-    ].join("");
-
-    return `note-${stamp}.md`;
   }
 
   function syncDraftFromEditor() {
@@ -260,7 +284,13 @@ function App() {
         }
       );
       setSavedContent(content);
-      setStatus(data.message || "Saved");
+      if (data.note) {
+        setDraft((current) => ({ ...current, ...data.note, content }));
+        setNotes((current) =>
+          [toNoteListItem({ ...data.note, content }), ...current.filter((note) => note.path !== data.note.path)]
+        );
+      }
+      setStatus(data.message || "已保存");
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -274,7 +304,7 @@ function App() {
     }
 
     try {
-      syncDraftFromEditor();
+      await saveNote();
       const data = await fetchJson(
         `/api/export/csdn?path=${encodeURIComponent(draft.path)}`,
         { method: "POST" }
@@ -306,12 +336,56 @@ function App() {
       throw new Error(data.error || "Image upload failed");
     }
 
-    setStatus(`Image saved to ${data.markdownPath}`);
+    setStatus(`图片已保存到 ${data.markdownPath}`);
     return `${assetBasePath}${data.markdownPath.replace("./", "")}`;
   }
 
-  function openRenameDialog(note) {
+  function updateTitle(nextTitle) {
+    if (!draft.path) {
+      return;
+    }
+
+    const cleanTitle = nextTitle || "未命名";
+    const nextContent = setMarkdownTitle(draft.content, cleanTitle);
+    setDraft((current) => ({
+      ...current,
+      title: cleanTitle,
+      content: nextContent
+    }));
+    setNotes((current) =>
+      current.map((note) =>
+        note.path === draft.path ? { ...note, title: cleanTitle } : note
+      )
+    );
+
+    const nextEditorMarkdown = transformMarkdownForEditor(nextContent, assetBasePath);
+    if (editorRef.current?.getMarkdown() !== nextEditorMarkdown) {
+      editorRef.current?.setMarkdown(nextEditorMarkdown);
+    }
+  }
+
+  async function copyContent() {
+    if (!draft.path) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(syncDraftFromEditor());
+    setActiveMenu(null);
+    setStatus("已复制当前笔记内容");
+  }
+
+  function exportPdf() {
+    setActiveMenu(null);
+    window.print();
+  }
+
+  function openRenameDialog(note = draft) {
+    if (!note?.path) {
+      return;
+    }
+
     setContextMenu(null);
+    setActiveMenu(null);
     setRenameState({
       path: note.path,
       name: getFileNameWithoutExtension(note.path)
@@ -347,20 +421,30 @@ function App() {
     }
   }
 
-  async function deleteNote(note) {
+  async function deleteNote(note = draft) {
+    if (!note?.path) {
+      return;
+    }
+
+    const confirmed = window.confirm(`确认删除「${note.title || note.path}」吗？这个操作会删除本地 md 和图片资源。`);
+    if (!confirmed) {
+      return;
+    }
+
     try {
       const data = await fetchJson(
         `/api/note?path=${encodeURIComponent(note.path)}&scope=notes`,
         { method: "DELETE" }
       );
       setContextMenu(null);
+      setActiveMenu(null);
       const nextNotes = await loadNotes();
 
       if (activePath === note.path) {
         if (nextNotes[0]) {
           await openNote(nextNotes[0].path);
         } else {
-          setEmptyState("No notes left. Create one to start writing.");
+          setEmptyState("没有笔记了，点击 + 创建一篇");
         }
       }
 
@@ -373,146 +457,216 @@ function App() {
   const showEmptyWorkspace = !draft.path;
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar-search">
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="search"
-          />
-        </div>
-
-        <div className="sidebar-notes">
-          <div className="sidebar-label">notes</div>
-          <div className="note-list">
-            {notes.map((note) => (
-              <button
-                key={note.path}
-                className={`note-item ${note.path === activePath ? "active" : ""}`}
-                onClick={() => openNote(note.path)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setContextMenu({
-                    x: event.clientX,
-                    y: event.clientY,
-                    note
-                  });
-                }}
-              >
-                <span>{note.title}</span>
-                <small>{note.path}</small>
-              </button>
-            ))}
-
-            {!notes.length && <div className="empty-list">No notes</div>}
+    <div className={`app ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <aside className="note-list-pane">
+        <div className="note-list-header">
+          <div className="search-row">
+            <label className="search-box">
+              <span aria-hidden="true">⌕</span>
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="搜索笔记..."
+              />
+              <kbd>⌘ K</kbd>
+            </label>
+            <button className="icon-button new-note-button" onClick={createNote} title="新建笔记">
+              +
+            </button>
           </div>
         </div>
 
-        <button
-          className="sidebar-export"
-          onClick={exportCsdnMarkdown}
-          disabled={!draft.path}
-        >
-          Export Markdown + Images
-        </button>
+        <div className="note-group-title">笔记</div>
+
+        <div className="note-list">
+          {notes.map((note) => (
+            <button
+              key={note.path}
+              className={`note-item ${note.path === activePath ? "active" : ""}`}
+              onClick={() => openNote(note.path)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  note
+                });
+              }}
+            >
+              <span className="note-item-title">{note.title || "未命名"}</span>
+              <span className="note-item-file">{note.path}</span>
+              <span className="note-item-time">{formatListDate(note.updatedAt)}</span>
+            </button>
+          ))}
+
+          {!notes.length && <div className="empty-list">没有匹配的笔记</div>}
+        </div>
       </aside>
 
-      <main className="workspace">
-        <section className="doc-strip">
-          <div className="doc-strip-main">
-            <div className="doc-file">{draft.path || "article-1.md"}</div>
-            <div className="doc-title-wrap">
-              <span className={`save-dot ${isDirty ? "dirty" : "saved"}`} />
-              <span className="doc-title">{derivedTitle || "笔记的标题"}</span>
+      <main className="editor-pane">
+        <div className="editor-topbar">
+          <button
+            className="sidebar-toggle"
+            onClick={() => setIsSidebarCollapsed((current) => !current)}
+            title={isSidebarCollapsed ? "展开笔记列表" : "折叠笔记列表"}
+          >
+            {isSidebarCollapsed ? "☰" : "‹"}
+          </button>
+          <div className="topbar-actions">
+            <span className={`save-state ${isSaving ? "saving" : isDirty ? "dirty" : "saved"}`}>
+              {saveLabel}
+            </span>
+            <div className="menu-anchor" onMouseDown={(event) => event.stopPropagation()}>
+              <button className="secondary-command" onClick={() => setActiveMenu(activeMenu === "share" ? null : "share")}>
+                <span aria-hidden="true">↥</span>
+                分享
+              </button>
+              {activeMenu === "share" && (
+                <div className="dropdown-menu share-menu" onMouseDown={(event) => event.stopPropagation()}>
+                  <div className="dropdown-title">分享</div>
+                  <button onClick={copyContent} disabled={!draft.path}>
+                    <span>⧉</span>
+                    复制内容
+                  </button>
+                  <button onClick={exportPdf} disabled={!draft.path}>
+                    <span>⇩</span>
+                    导出为 PDF
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setActiveMenu(null);
+                      await exportCsdnMarkdown();
+                    }}
+                    disabled={!draft.path}
+                  >
+                    <span>↥</span>
+                    导出 Markdown + 图片
+                  </button>
+                  <button disabled>
+                    <span>◎</span>
+                    生成只读页面（即将推出）
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="menu-anchor" onMouseDown={(event) => event.stopPropagation()}>
+              <button className="icon-button more-button" onClick={() => setActiveMenu(activeMenu === "more" ? null : "more")}>
+                ...
+              </button>
+              {activeMenu === "more" && (
+                <div className="dropdown-menu more-menu" onMouseDown={(event) => event.stopPropagation()}>
+                  <button onClick={() => openRenameDialog()}>
+                    <span>✎</span>
+                    重命名
+                  </button>
+                  <button className="danger" onClick={() => deleteNote()}>
+                    <span>⌫</span>
+                    删除笔记
+                  </button>
+                  <button disabled>
+                    <span>▣</span>
+                    在文件夹中显示
+                  </button>
+                  <button disabled>
+                    <span>⚙</span>
+                    设置
+                  </button>
+                </div>
+              )}
             </div>
           </div>
-          <button onClick={saveNote} disabled={!draft.path || isSaving}>
-            {isSaving ? "Saving..." : "Save"}
-          </button>
-        </section>
-
-        <section className="new-note-strip">
-          <button onClick={createNote}>new note</button>
-          <input
-            value={newNoteName}
-            onChange={(event) => setNewNoteName(event.target.value)}
-            placeholder="新建一个笔记"
-          />
-        </section>
+        </div>
 
         {showEmptyWorkspace ? (
           <section className="empty-workspace">
-            <h2>No note selected</h2>
-            <p>Create a note or pick one from the left list.</p>
+            <h2>没有选中笔记</h2>
+            <p>从左侧选择一篇笔记，或点击 + 新建。</p>
           </section>
         ) : (
-          <section className="editor-card">
-            <MDXEditor
-              ref={editorRef}
-              markdown={editorMarkdown || "# "}
-              className="rich-editor-shell"
-              contentEditableClassName="rich-editor-content"
-              placeholder="直接写内容，支持粘贴图片。按 Ctrl / Cmd + S 保存。"
-              plugins={[
-                headingsPlugin(),
-                listsPlugin(),
-                quotePlugin(),
-                linkPlugin(),
-                tablePlugin(),
-                markdownShortcutPlugin(),
-                imagePlugin({
-                  imageUploadHandler: uploadImage
-                }),
-                toolbarPlugin({
-                  toolbarClassName: "editor-toolbar",
-                  toolbarContents: () => (
-                    <>
-                      <UndoRedo />
-                      <Separator />
-                      <BlockTypeSelect />
-                      <Separator />
-                      <BoldItalicUnderlineToggles />
-                      <StrikeThroughSupSubToggles />
-                      <Separator />
-                      <ListsToggle />
-                      <CreateLink />
-                      <InsertImage />
-                      <InsertTable />
-                      <InsertThematicBreak />
-                    </>
-                  )
-                })
-              ]}
-              onChange={(markdown) => {
-                const nextContent = transformMarkdownForStorage(markdown, assetBasePath);
-                const nextTitle = extractTitleFromContent(draft.path, nextContent);
-                setDraft((current) => ({
-                  ...current,
-                  content: nextContent,
-                  title: nextTitle
-                }));
-                setNotes((current) =>
-                  current.map((note) =>
-                    note.path === activePath ? { ...note, title: nextTitle } : note
-                  )
-                );
-              }}
-            />
-          </section>
+          <>
+            <section className="editor-header">
+              <input
+                className="title-input"
+                value={derivedTitle}
+                onChange={(event) => updateTitle(event.target.value)}
+                aria-label="笔记标题"
+              />
+              <div className="note-meta">
+                <span>▧ {draft.path}</span>
+                <span>创建于 {formatMetaDate(draft.createdAt)}</span>
+                <span>更新于 {formatMetaDate(draft.updatedAt)}</span>
+              </div>
+              <button className="tag-entry" type="button">添加标签...</button>
+            </section>
+
+            <section className="editor-card">
+              <MDXEditor
+                ref={editorRef}
+                markdown={editorMarkdown || "# 未命名\n\n"}
+                className="rich-editor-shell"
+                contentEditableClassName="rich-editor-content"
+                placeholder="开始记录..."
+                plugins={[
+                  headingsPlugin(),
+                  listsPlugin(),
+                  quotePlugin(),
+                  codeBlockPlugin({ defaultCodeBlockLanguage: "txt" }),
+                  linkPlugin(),
+                  tablePlugin(),
+                  markdownShortcutPlugin(),
+                  imagePlugin({
+                    imageUploadHandler: uploadImage
+                  }),
+                  toolbarPlugin({
+                    toolbarClassName: "editor-toolbar",
+                    toolbarContents: () => (
+                      <>
+                        <UndoRedo />
+                        <Separator />
+                        <BlockTypeSelect />
+                        <Separator />
+                        <BoldItalicUnderlineToggles />
+                        <StrikeThroughSupSubToggles />
+                        <Separator />
+                        <ListsToggle />
+                        <Separator />
+                        <CreateLink />
+                        <InsertCodeBlock />
+                        <InsertImage />
+                        <InsertTable />
+                        <InsertThematicBreak />
+                      </>
+                    )
+                  })
+                ]}
+                onChange={(markdown) => {
+                  const nextContent = transformMarkdownForStorage(markdown, assetBasePath);
+                  const nextTitle = extractTitleFromContent(draft.path, nextContent);
+                  setDraft((current) => ({
+                    ...current,
+                    content: nextContent,
+                    title: nextTitle
+                  }));
+                  setNotes((current) =>
+                    current.map((note) =>
+                      note.path === activePath ? { ...note, title: nextTitle } : note
+                    )
+                  );
+                }}
+              />
+              <div className="word-count">{wordCount} 个字</div>
+            </section>
+
+            {exportedMarkdown && (
+              <section className="export-panel">
+                <div className="pane-title">导出的 Markdown</div>
+                <textarea readOnly value={exportedMarkdown} />
+              </section>
+            )}
+          </>
         )}
 
-        <footer className="status-bar">
-          <span>{status}</span>
-          {draft.path && <span>Ctrl / Cmd + S 保存</span>}
-        </footer>
-
-        {exportedMarkdown && (
-          <section className="export-panel">
-            <div className="pane-title">Exported Markdown</div>
-            <textarea readOnly value={exportedMarkdown} />
-          </section>
-        )}
+        <div className="sr-status" aria-live="polite">{status}</div>
       </main>
 
       {contextMenu && (
@@ -521,34 +675,43 @@ function App() {
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(event) => event.stopPropagation()}
         >
-          <button onClick={() => openRenameDialog(contextMenu.note)}>Rename</button>
-          <button onClick={() => deleteNote(contextMenu.note)}>Delete</button>
+          <button onClick={() => openRenameDialog(contextMenu.note)}>重命名</button>
+          <button className="danger" onClick={() => deleteNote(contextMenu.note)}>删除</button>
         </div>
       )}
 
       {renameState && (
         <div className="modal-backdrop" onClick={() => setRenameState(null)}>
           <form className="modal-card" onClick={(event) => event.stopPropagation()} onSubmit={submitRename}>
-            <h2>Rename Note</h2>
+            <h2>重命名笔记</h2>
             <input
               autoFocus
               value={renameState.name}
               onChange={(event) =>
                 setRenameState((current) => ({ ...current, name: event.target.value }))
               }
-              placeholder="new-file-name"
+              placeholder="新文件名"
             />
             <div className="modal-actions">
-              <button type="button" className="secondary-button" onClick={() => setRenameState(null)}>
-                Cancel
+              <button type="button" className="ghost-button" onClick={() => setRenameState(null)}>
+                取消
               </button>
-              <button type="submit">Save Name</button>
+              <button type="submit">保存</button>
             </div>
           </form>
         </div>
       )}
     </div>
   );
+}
+
+function toNoteListItem(note) {
+  return {
+    path: note.path,
+    title: note.title,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt
+  };
 }
 
 function extractTitleFromContent(notePath, content) {
@@ -562,11 +725,82 @@ function extractTitleFromContent(notePath, content) {
     return heading;
   }
 
-  return notePath ? notePath.split("/").pop()?.replace(/\.md$/i, "") || "Untitled" : "";
+  return notePath ? notePath.split("/").pop()?.replace(/\.md$/i, "") || "未命名" : "";
+}
+
+function setMarkdownTitle(content, title) {
+  const normalizedTitle = title.trim() || "未命名";
+  const lines = content.split("\n");
+  const headingIndex = lines.findIndex((line) => line.trim().startsWith("# "));
+
+  if (headingIndex >= 0) {
+    lines[headingIndex] = `# ${normalizedTitle}`;
+    return lines.join("\n");
+  }
+
+  return `# ${normalizedTitle}\n\n${content}`;
+}
+
+function countWords(content) {
+  const text = content
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, " ")
+    .replace(/\[[^\]]*\]\([^)]+\)/g, " ")
+    .replace(/[#>*_`~\-[\]()+.!|]/g, " ")
+    .trim();
+
+  if (!text) {
+    return 0;
+  }
+
+  const chineseChars = text.match(/[\u4e00-\u9fff]/g)?.length || 0;
+  const latinWords = text
+    .replace(/[\u4e00-\u9fff]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return chineseChars + latinWords;
 }
 
 function getFileNameWithoutExtension(notePath) {
   return notePath.split("/").pop()?.replace(/\.md$/i, "") || "";
+}
+
+function formatListDate(value) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  if (isToday) {
+    return `今天 ${date.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    })}`;
+  }
+
+  return `${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function formatMetaDate(value) {
+  if (!value) {
+    return "刚刚";
+  }
+
+  const date = new Date(value);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  if (isToday) {
+    return `今天 ${date.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    })}`;
+  }
+
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
 function transformMarkdownForEditor(content, assetBasePath) {
