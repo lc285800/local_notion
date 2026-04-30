@@ -470,9 +470,6 @@ function App() {
               />
               <kbd>⌘ K</kbd>
             </label>
-            <button className="icon-button new-note-button" onClick={createNote} title="新建笔记">
-              +
-            </button>
           </div>
         </div>
 
@@ -494,7 +491,6 @@ function App() {
               }}
             >
               <span className="note-item-title">{note.title || "未命名"}</span>
-              <span className="note-item-file">{note.path}</span>
               <span className="note-item-time">{formatListDate(note.updatedAt)}</span>
             </button>
           ))}
@@ -512,7 +508,18 @@ function App() {
           >
             {isSidebarCollapsed ? "☰" : "‹"}
           </button>
+          {!showEmptyWorkspace && (
+            <input
+              className="compact-title-input"
+              value={derivedTitle}
+              onChange={(event) => updateTitle(event.target.value)}
+              aria-label="当前笔记标题"
+            />
+          )}
           <div className="topbar-actions">
+            <button className="new-note-command" onClick={createNote}>
+              新建笔记
+            </button>
             <span className={`save-state ${isSaving ? "saving" : isDirty ? "dirty" : "saved"}`}>
               {saveLabel}
             </span>
@@ -584,21 +591,6 @@ function App() {
           </section>
         ) : (
           <>
-            <section className="editor-header">
-              <input
-                className="title-input"
-                value={derivedTitle}
-                onChange={(event) => updateTitle(event.target.value)}
-                aria-label="笔记标题"
-              />
-              <div className="note-meta">
-                <span>▧ {draft.path}</span>
-                <span>创建于 {formatMetaDate(draft.createdAt)}</span>
-                <span>更新于 {formatMetaDate(draft.updatedAt)}</span>
-              </div>
-              <button className="tag-entry" type="button">添加标签...</button>
-            </section>
-
             <section className="editor-card">
               <MDXEditor
                 ref={editorRef}

@@ -27,7 +27,7 @@ The main product principle is local ownership: notes remain standard Markdown fi
 The app is intentionally focused on a single writing surface.
 
 - Left pane: search, new note, and note list.
-- Right pane: save state, share menu, more menu, editable note title, metadata, toolbar, and editor content.
+- Right pane: save state, share menu, more menu, toolbar, and editor content.
 - The note list can be collapsed to give the editor more space.
 - The browser page itself does not scroll; the note list and editor content are the local scroll regions.
 
@@ -54,15 +54,11 @@ App
 └── EditorPane
     ├── Topbar
     │   ├── SidebarToggle
+    │   ├── CurrentTitle
+    │   ├── NewNoteButton
     │   ├── SaveState
     │   ├── ShareMenu
     │   └── MoreMenu
-    ├── EditorHeader
-    │   ├── EditableTitle
-    │   ├── FileName
-    │   ├── CreatedAt
-    │   ├── UpdatedAt
-    │   └── TagPlaceholder
     └── EditorCard
         ├── Toolbar
         ├── ScrollableEditorContent
@@ -75,7 +71,7 @@ Layout rules:
 - The browser-level page does not scroll.
 - The note list scrolls independently.
 - The editor content scrolls independently.
-- The topbar, title area, and toolbar remain fixed while writing.
+- The topbar and toolbar remain fixed while writing.
 
 ## Frontend Architecture
 

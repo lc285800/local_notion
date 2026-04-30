@@ -26,7 +26,7 @@ This version focuses on the core notebook workflow:
 - Images use stable relative Markdown paths such as `![image](./article.assets/20260425-153012.png)`.
 - The left pane supports search, note switching, note creation, right-click rename, and right-click delete.
 - New notes are created as `未命名.md`, then `未命名-1.md`, `未命名-2.md`, and so on when names conflict.
-- The right pane supports editable title metadata, autosave, `Cmd/Ctrl + S`, toolbar editing, word count, and collapsible note list.
+- The right pane keeps the editor prominent with autosave, `Cmd/Ctrl + S`, toolbar editing, word count, and a collapsible note list.
 - The Share menu contains copy content, export PDF through the browser print dialog, export Markdown + images, and a disabled read-only page placeholder.
 
 ## Local Storage
