@@ -103,6 +103,93 @@ npm run build
 npm start
 ```
 
+### macOS Login Autostart
+
+For a stable macOS login startup, run the app from a runtime copy outside
+`~/Documents`. macOS privacy controls can block background `launchd` jobs from
+starting correctly when the working directory is under `~/Documents`.
+
+The current recommended runtime location is:
+
+```text
+~/Applications/notion_local_runtime
+```
+
+One-time setup:
+
+```bash
+mkdir -p ~/Applications/notion_local_runtime
+rsync -a --delete --exclude '.git/' --exclude 'logs/' ~/Documents/notion_local/ ~/Applications/notion_local_runtime/
+mkdir -p ~/Applications/notion_local_runtime/logs
+```
+
+Create `~/Library/LaunchAgents/com.evanliu.notion-local.plist` with:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.evanliu.notion-local</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/evanliu/.local/bin/node</string>
+    <string>server/index.js</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <key>PORT</key>
+    <string>3001</string>
+    <key>PATH</key>
+    <string>/Users/evanliu/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/evanliu/Applications/notion_local_runtime</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/evanliu/Applications/notion_local_runtime/logs/launchd.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/evanliu/Applications/notion_local_runtime/logs/launchd.err.log</string>
+</dict>
+</plist>
+```
+
+Load or restart the service:
+
+```bash
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.evanliu.notion-local.plist 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.evanliu.notion-local.plist
+launchctl enable gui/$(id -u)/com.evanliu.notion-local
+launchctl kickstart -k gui/$(id -u)/com.evanliu.notion-local
+```
+
+Verify:
+
+```bash
+launchctl print gui/$(id -u)/com.evanliu.notion-local
+lsof -nP -iTCP:3001 -sTCP:LISTEN
+curl -I http://localhost:3001
+```
+
+Open:
+
+```text
+http://localhost:3001
+```
+
 ## Git Policy
 
 This repository stores app source code, not personal notebook data.

@@ -16,6 +16,18 @@ This repository prefers predictable, low-friction workflows for local developmen
 - Do not commit local notebook content from `docs/` unless the user explicitly asks.
 - Keep `README.md` accurate when major product behavior changes.
 
+## macOS Login Autostart Notes
+
+- For launch-on-login setup, prefer a runtime copy at `~/Applications/notion_local_runtime`.
+- Do not run the LaunchAgent directly from `~/Documents/notion_local`; macOS privacy controls can leave the Node process stuck before it opens port `3001`.
+- Use a LaunchAgent at `~/Library/LaunchAgents/com.evanliu.notion-local.plist`.
+- In the LaunchAgent, call Node directly with `ProgramArguments` of `/Users/evanliu/.local/bin/node` and `server/index.js`; avoid a shell wrapper script for this setup.
+- Set `WorkingDirectory` to `/Users/evanliu/Applications/notion_local_runtime`.
+- Set environment variables in the plist: `NODE_ENV=production`, `PORT=3001`, and a PATH containing `/Users/evanliu/.local/bin`.
+- Log to `~/Applications/notion_local_runtime/logs/launchd.out.log` and `launchd.err.log`.
+- After loading, verify all three: `launchctl print gui/$(id -u)/com.evanliu.notion-local`, `lsof -nP -iTCP:3001 -sTCP:LISTEN`, and `curl -I http://localhost:3001`.
+- If updating the source app later, rebuild and sync into the runtime copy before restarting the LaunchAgent.
+
 ## GitHub Workflow Preference
 
 When the task involves GitHub, use this order of operations:
